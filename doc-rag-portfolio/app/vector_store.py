@@ -3,6 +3,7 @@ Vector store using Chroma (local) with free local embeddings (sentence-transform
 No API key needed for indexing or retrieval — only chat/report generation uses OpenAI.
 """
 from pathlib import Path
+import os
 import uuid
 
 import chromadb
@@ -42,20 +43,32 @@ class DocVectorStore:
     def __init__(self, persist_dir: Path = CHROMA_DIR, collection_name: str = "doc_rag"):
         self.persist_dir = Path(persist_dir)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
-        # Streamlit Cloud + some Chroma/Python runtime combos can fail while
-        # constructing PersistentClient. Fall back to in-memory client so the
-        # app remains usable instead of crashing at startup.
-        try:
-            self.client = chromadb.PersistentClient(
-                path=str(self.persist_dir),
-                settings=Settings(anonymized_telemetry=False),
-            )
-        except Exception:
-            self.client = chromadb.EphemeralClient(
-                settings=Settings(anonymized_telemetry=False),
-            )
+        self.client = self._create_client()
         self.collection_name = collection_name
         self._collection = None
+
+    def _create_client(self):
+        """
+        Build a Chroma client with cloud-safe fallbacks.
+        Some Chroma/runtime combinations on Streamlit Cloud can raise runtime
+        errors while constructing PersistentClient.
+        """
+        settings = Settings(anonymized_telemetry=False)
+
+        # Streamlit Cloud tends to be the environment where this crash appears.
+        # Prefer ephemeral there unless explicitly overridden.
+        force_ephemeral = os.getenv("DOC_PARSE_FORCE_EPHEMERAL", "").lower() in {"1", "true", "yes"}
+        is_streamlit_cloud = bool(os.getenv("STREAMLIT_SHARING_MODE")) or "/mount/src" in str(Path.cwd())
+        if force_ephemeral or is_streamlit_cloud:
+            return chromadb.EphemeralClient(settings=settings)
+
+        try:
+            return chromadb.PersistentClient(
+                path=str(self.persist_dir),
+                settings=settings,
+            )
+        except Exception:
+            return chromadb.EphemeralClient(settings=settings)
 
     @property
     def collection(self):
