@@ -42,10 +42,18 @@ class DocVectorStore:
     def __init__(self, persist_dir: Path = CHROMA_DIR, collection_name: str = "doc_rag"):
         self.persist_dir = Path(persist_dir)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
-        self.client = chromadb.PersistentClient(
-            path=str(self.persist_dir),
-            settings=Settings(anonymized_telemetry=False),
-        )
+        # Streamlit Cloud + some Chroma/Python runtime combos can fail while
+        # constructing PersistentClient. Fall back to in-memory client so the
+        # app remains usable instead of crashing at startup.
+        try:
+            self.client = chromadb.PersistentClient(
+                path=str(self.persist_dir),
+                settings=Settings(anonymized_telemetry=False),
+            )
+        except Exception:
+            self.client = chromadb.EphemeralClient(
+                settings=Settings(anonymized_telemetry=False),
+            )
         self.collection_name = collection_name
         self._collection = None
 
