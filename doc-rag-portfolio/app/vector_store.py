@@ -4,7 +4,20 @@ No API key needed for indexing or retrieval — only chat/report generation uses
 """
 from pathlib import Path
 import os
+import sys
+import tempfile
 import uuid
+
+# Streamlit Cloud can ship an old sqlite3; Chroma needs >= 3.35
+try:
+    import sqlite3
+
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        import pysqlite3  # type: ignore[import-untyped]
+
+        sys.modules["sqlite3"] = pysqlite3
+except ImportError:
+    pass
 
 import chromadb
 from chromadb.config import Settings
@@ -50,17 +63,26 @@ class DocVectorStore:
     def _create_client(self):
         """
         Build a Chroma client with cloud-safe fallbacks.
-        Some Chroma/runtime combinations on Streamlit Cloud can raise runtime
-        errors while constructing PersistentClient.
+
+        Streamlit Cloud: use a writable temp dir (not EphemeralClient — Chroma 1.x
+        raises "Could not connect to tenant" there). Index is session-scoped anyway.
+        Local: persist under data/chroma_db.
         """
         settings = Settings(anonymized_telemetry=False)
+        is_streamlit_cloud = bool(os.getenv("STREAMLIT_SHARING_MODE")) or "/mount/src" in str(
+            Path.cwd()
+        )
 
-        # Streamlit Cloud tends to be the environment where this crash appears.
-        # Prefer ephemeral there unless explicitly overridden.
-        force_ephemeral = os.getenv("DOC_PARSE_FORCE_EPHEMERAL", "").lower() in {"1", "true", "yes"}
-        is_streamlit_cloud = bool(os.getenv("STREAMLIT_SHARING_MODE")) or "/mount/src" in str(Path.cwd())
-        if force_ephemeral or is_streamlit_cloud:
-            return chromadb.EphemeralClient(settings=settings)
+        if is_streamlit_cloud:
+            cloud_dir = Path(tempfile.gettempdir()) / "docparse_chroma"
+            cloud_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                return chromadb.PersistentClient(
+                    path=str(cloud_dir),
+                    settings=settings,
+                )
+            except Exception:
+                pass
 
         try:
             return chromadb.PersistentClient(
@@ -68,7 +90,15 @@ class DocVectorStore:
                 settings=settings,
             )
         except Exception:
-            return chromadb.EphemeralClient(settings=settings)
+            pass
+
+        try:
+            from chromadb.api.client import SharedSystemClient
+
+            SharedSystemClient.clear_system_cache()
+        except Exception:
+            pass
+        return chromadb.EphemeralClient(settings=settings)
 
     @property
     def collection(self):
