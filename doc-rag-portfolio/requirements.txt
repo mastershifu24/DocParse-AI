@@ -8,7 +8,8 @@ pypdf>=3.0.0
 sentence-transformers>=2.2.0
 
 # Vector store (local, no cloud signup required)
-chromadb==0.4.24
+# Chroma: 0.4.x breaks on Python 3.13 + NumPy 2 (np.float_ removed). Use 0.5.23+.
+chromadb==0.5.23
 pysqlite3-binary>=0.5.0
 
 # LLM for chat + report generation (needs API key)

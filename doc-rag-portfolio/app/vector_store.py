@@ -64,9 +64,8 @@ class DocVectorStore:
         """
         Build a Chroma client with cloud-safe fallbacks.
 
-        Streamlit Cloud: use a writable temp dir (not EphemeralClient — Chroma 1.x
-        raises "Could not connect to tenant" there). Index is session-scoped anyway.
-        Local: persist under data/chroma_db.
+        Streamlit Cloud (Python 3.13 + NumPy 2): use PersistentClient in /tmp.
+        Do not use EphemeralClient on Cloud — Chroma 1.x hits tenant validation errors.
         """
         settings = Settings(anonymized_telemetry=False)
         is_streamlit_cloud = bool(os.getenv("STREAMLIT_SHARING_MODE")) or "/mount/src" in str(
@@ -76,13 +75,10 @@ class DocVectorStore:
         if is_streamlit_cloud:
             cloud_dir = Path(tempfile.gettempdir()) / "docparse_chroma"
             cloud_dir.mkdir(parents=True, exist_ok=True)
-            try:
-                return chromadb.PersistentClient(
-                    path=str(cloud_dir),
-                    settings=settings,
-                )
-            except Exception:
-                pass
+            return chromadb.PersistentClient(
+                path=str(cloud_dir),
+                settings=settings,
+            )
 
         try:
             return chromadb.PersistentClient(
